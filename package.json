@@ -6,17 +6,22 @@
 	"devDependencies": {
 		"expect.js": "*",
 		"express": "*",
-		"async": "*"
-	},
-	"dependencies": {
-		"request": "*"
-	},
-	"license": "MIT",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/vdemedes/restie.git"
-	},
-	"engine": {
-		"node": ">=0.4"
-	}
+		"async": "*",
+    "grunt": "*",
+    "grunt-contrib-uglify": "*",
+    "grunt-contrib-concat": "*",
+    "grunt-contrib-watch": "*",
+    "grunt-contrib-coffee": "*"
+  },
+  "dependencies": {
+    "request": "*"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vdemedes/restie.git"
+  },
+  "engine": {
+    "node": ">=0.4"
+  }
 }
