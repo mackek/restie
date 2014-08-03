@@ -1,4 +1,4 @@
-/*! restie - v0.1.1 - 2014-04-16
+/*! restie - v0.1.1 - 2014-07-31
 * Copyright (c) 2014 Vadim Demedes; Licensed MIT */
 
 if (!(typeof window !== "undefined" && window !== null)) { global.window = {}; }/*
@@ -697,7 +697,6 @@ Function.prototype.clone = function() {
       clone[property] = this[property];
     }
   }
-  clone.prototype = this.prototype;
   return clone;
 };
 
@@ -721,12 +720,18 @@ Restie = (function() {
     return _results;
   };
 
-  Restie.define = function(name, options) {
+  Restie.define = function(name, parent, options) {
     var action, key, model;
     if (options == null) {
       options = {};
     }
     model = Model.clone();
+    if (parent) {
+      model.prototype = new parent;
+    } else {
+      model.prototype = new Model();
+    }
+    console.log("Model: ", model);
     model.prototype.resourceName = model.resourceName = name.pluralize().toLowerCase();
     model.prototype.options = model.options = {};
     for (key in this.options) {
@@ -755,21 +760,17 @@ Restie = (function() {
           param = _ref[i];
           params[param] = paramVals[i];
         }
-        console.log(params);
       }
       request = {
-        url: "" + this.options.urls.base + "/" + model.resourceName + "/" + this[model.options.primaryKey] + "/" + (options.path ? options.path : action),
+        url: "" + model.options.urls.base + "/" + model.resourceName + "/" + this[model.options.primaryKey] + "/" + (options.path ? options.path : action),
         method: options.method ? options.method : 'PUT',
         params: params
       };
+      console.log("Making request " + action);
       request = this.setRequestOptions(request);
-      return Restie.adapter.request(request, function(err, res, body) {
+      return Restie.request(request, function(err, res, body) {
         if (callback) {
-          if (res.statusCode === 200) {
-            return callback(false);
-          } else {
-            return callback(res);
-          }
+          return callback(err, res, body);
         }
       });
     };
@@ -854,22 +855,18 @@ Model = (function() {
   };
 
   Model.bakeModels = function(items) {
-    console.log("@bakeModels " + (JSON.stringify(this)));
     return bakeModels(items, this.model);
   };
 
   Model.prototype.bakeModels = function(items) {
-    console.log("bakeModels " + (JSON.stringify(this)));
     return bakeModels(items, this.model);
   };
 
   Model.prototype.setRequestOptions = function(request) {
-    console.log("setRequestOptions " + (JSON.stringify(this)));
     return setRequestOptions(this.options, request);
   };
 
   Model.setRequestOptions = function(request) {
-    console.log("@setRequestOptions " + (JSON.stringify(this)));
     return setRequestOptions(this.options, request);
   };
 
@@ -881,9 +878,9 @@ Model = (function() {
     };
     request = this.setRequestOptions(request);
     that = this;
-    return Restie.adapter.request(request, function(err, res, body) {
+    return Restie.request(request, function(err, res, body) {
       if (res.statusCode === 200) {
-        return callback(false, that.bakeModels(JSON.parse(body)));
+        return callback(false, that.bakeModels(body));
       } else {
         return callback(res, []);
       }
@@ -892,10 +889,21 @@ Model = (function() {
 
   Model.where = function(options, callback) {
     var request;
-    return request = {
+    request = {
       url: "" + this.options.urls.base + "/" + this.resourceName,
-      method: 'GET'
+      method: 'GET',
+      params: options
     };
+    request = this.setRequestOptions(request);
+    return Restie.request(request, (function(_this) {
+      return function(err, res, body) {
+        if (res.statusCode === 200) {
+          return callback(false, _this.bakeModels(body));
+        } else {
+          return callback(res, []);
+        }
+      };
+    })(this));
   };
 
   Model.findByPrimaryKey = function(value, callback) {
@@ -906,9 +914,9 @@ Model = (function() {
     };
     request = this.setRequestOptions(request);
     that = this;
-    return Restie.adapter.request(request, function(err, res, body) {
+    return Restie.request(request, function(err, res, body) {
       if (res.statusCode === 200) {
-        return callback(false, that.bakeModels([JSON.parse(body)])[0]);
+        return callback(false, that.bakeModels([body])[0]);
       } else {
         return callback(res, {});
       }
@@ -947,14 +955,13 @@ Model = (function() {
     primaryKey = this.options.primaryKey || 'id';
     if (fields[primaryKey]) {
       request.url += "/" + fields[primaryKey];
-      request.method = 'POST';
+      request.method = 'PUT';
       request.form._method = 'PUT';
     }
     request = this.setRequestOptions(request);
     that = this;
-    return Restie.adapter.request(request, function(err, res, body) {
+    return Restie.request(request, function(err, res, body) {
       if (res.statusCode === 201 || res.statusCode === 200) {
-        body = JSON.parse(body);
         that[primaryKey] = body[primaryKey];
         return callback(false, that.bakeModels([body])[0]);
       } else {
@@ -974,13 +981,7 @@ Model = (function() {
       }
     };
     request = this.setRequestOptions(request);
-    return Restie.adapter.request(request, function(err, res) {
-      if (res.statusCode === 200) {
-        return callback(false);
-      } else {
-        return callback(res);
-      }
-    });
+    return Restie.request(request, callback);
   };
 
   return Model;
@@ -1001,3 +1002,21 @@ if (window.location != null) {
   Restie.adapter = new NodejsRequestAdapter;
   module.exports = Restie;
 }
+
+Restie.request = function(options, callback) {
+  if (Restie.options.before) {
+    Restie.options.before(options);
+  }
+  return Restie.adapter.request(options, function(err, res, body) {
+    body = JSON.parse(body);
+    if (res.statusCode === 200 || res.statusCode === 201) {
+      if (Restie.options.after) {
+        return Restie.options.after(false, res, body, callback);
+      } else {
+        return callback(err, res, body);
+      }
+    } else {
+      return callback(err, res, body);
+    }
+  });
+};

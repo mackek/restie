@@ -1,9 +1,7 @@
-Function::clone = ->
+Function::clone = () ->
   clone = ->
   for property of @
     clone[property] = @[property] if @hasOwnProperty property
-  
-  clone.prototype = @prototype
   clone
 
 class Restie
@@ -12,8 +10,14 @@ class Restie
     for key of options
       @options[key] = options[key]
   
-  @define: (name, options = {}) ->
-    model = Model.clone() # clonning Model
+  @define: (name, parent, options = {}) ->
+    model = Model.clone()
+    if parent
+      #parent.prototype = new Model()
+      model.prototype = new parent
+    else
+      model.prototype = new Model()
+    console.log("Model: ", model)
     model::resourceName = model.resourceName = name.pluralize().toLowerCase() # Post -> posts
     model::options = model.options = {}
     for key of @options
@@ -33,18 +37,15 @@ class Restie
         params = {}
         for param, i in options.params
           params[param] = paramVals[i]
-        console.log params
       request=
-        url: "#{@options.urls.base}/#{model.resourceName}/#{@[model.options.primaryKey]}/#{if options.path then options.path else action}"
+        url: "#{model.options.urls.base}/#{model.resourceName}/#{@[model.options.primaryKey]}/#{if options.path then options.path else action}"
         method: if options.method then options.method else 'PUT'
         params: params
+      console.log("Making request #{action}")
       request = @setRequestOptions request
-      Restie.adapter.request request, (err, res, body) ->
+      Restie.request request, (err,res,body) ->
         if callback
-          if res.statusCode is 200
-            callback no
-          else
-            callback res
+          callback err,res,body
  
 setRequestOptions = (options, request) ->
   request.headers = {} if not request.headers
@@ -91,19 +92,19 @@ class Model # Generic model for all resources
       @options[key] = options[key]
   
   @bakeModels: (items) -> # converting plain objects into Restie models
-    console.log("@bakeModels #{JSON.stringify(@)}")
+    #console.log("@bakeModels #{JSON.stringify(@)}")
     bakeModels items, @model
   
   bakeModels: (items) ->
-    console.log("bakeModels #{JSON.stringify(@)}")
+    #console.log("bakeModels #{JSON.stringify(@)}")
     bakeModels items, @model
   
   setRequestOptions: (request) ->
-    console.log("setRequestOptions #{JSON.stringify(@)}")
+    #console.log("setRequestOptions #{JSON.stringify(@)}")
     setRequestOptions @options, request
   
   @setRequestOptions: (request) ->
-    console.log("@setRequestOptions #{JSON.stringify(@)}")
+    #console.log("@setRequestOptions #{JSON.stringify(@)}")
     setRequestOptions @options, request
   
   @all: (callback) -> # getting all items
@@ -114,15 +115,22 @@ class Model # Generic model for all resources
     request = @setRequestOptions request
       
     that = @
-    Restie.adapter.request request, (err, res, body) ->
+    Restie.request request, (err, res, body) ->
       if res.statusCode is 200
-        callback no, that.bakeModels JSON.parse(body)
+        callback no, that.bakeModels body
       else
         callback res, []
   @where: (options, callback) ->
     request=
       url: "#{ @options.urls.base }/#{ @resourceName }"
       method: 'GET'
+      params: options
+    request = @setRequestOptions request
+    Restie.request request, (err, res, body) =>
+      if res.statusCode is 200
+        callback no, @.bakeModels body
+      else
+        callback res, []
 
   @findByPrimaryKey: (value, callback) -> # finding by primary key
     request=
@@ -132,9 +140,9 @@ class Model # Generic model for all resources
     request = @setRequestOptions request
     
     that = @
-    Restie.adapter.request request, (err, res, body) ->
+    Restie.request request, (err, res, body) ->
       if res.statusCode is 200
-        callback no, that.bakeModels([JSON.parse(body)])[0]
+        callback no, that.bakeModels([body])[0]
       else
         callback res, {}
 
@@ -164,15 +172,14 @@ class Model # Generic model for all resources
     
     if fields[primaryKey]
       request.url += "/#{ fields[primaryKey] }"
-      request.method = 'POST'
+      request.method = 'PUT'
       request.form._method = 'PUT'
     
     request = @setRequestOptions request
     
     that = @
-    Restie.adapter.request request, (err, res, body) ->
+    Restie.request request, (err, res, body) ->
       if res.statusCode is 201 or res.statusCode is 200
-        body = JSON.parse body
         that[primaryKey] = body[primaryKey]
         callback no, that.bakeModels([body])[0]
       else
@@ -188,11 +195,7 @@ class Model # Generic model for all resources
     
     request = @setRequestOptions request
     
-    Restie.adapter.request request, (err, res) ->
-      if res.statusCode is 200
-        callback no
-      else
-        callback res
+    Restie.request request, callback
 
 if window.location?
   Restie.env = 'browser'
@@ -205,3 +208,17 @@ else
   Restie.env = 'nodejs'
   Restie.adapter = new NodejsRequestAdapter
   module.exports = Restie
+
+Restie.request = (options, callback) ->
+  if Restie.options.before
+    Restie.options.before options
+  Restie.adapter.request options, (err, res, body) ->
+    body = JSON.parse(body)
+    if res.statusCode is 200 or res.statusCode is 201
+      if Restie.options.after
+        Restie.options.after(no, res, body, callback)
+      else
+        #console.log("Request response", err, res, body)
+        callback(err, res, body)
+    else
+      callback(err, res, body)
